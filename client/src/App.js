@@ -4,9 +4,15 @@ import './App.css';
 
 class App extends Component {
 
-    state = {
-        data: null
-    };
+
+	// =============================================================================================
+	constructor(props) {
+		super(props);
+
+		this.state = { data: null };
+
+		this.saveToBackend = this.saveToBackend.bind(this);
+	}
 
 
     // =============================================================================================
@@ -19,46 +25,35 @@ class App extends Component {
 				</header>
 
 				// Render the newly fetched data inside of this.state.data
-				<div className="App-intro"><div dangerouslySetInnerHTML={ { __html:this.state.data && this.state.data.body } }></div></div>
+				<div className="App-intro">
+					<div dangerouslySetInnerHTML={ { __html:this.state.data && this.state.data.body } }></div>
+
+					<button onClick={this.saveToBackend} data-endpoint="stats">Get Account Stats</button>
+					<button onClick={this.saveToBackend} data-endpoint="session">Get Session Stats</button>
+				</div>
             </div>
    		);
     };
 
 
 	// =============================================================================================
-	componentDidMount() {
+	componentDidMount( e ) {
 
-    	// Call our fetch function below once the component mounts
-		// this.callBackendAPI( 'profile' )
-		// 	.then(res => {
-		//
-		// 		console.log( "profile", res );
-		// 	} )
-		// 	.catch(err => console.log( "error-profile", err ) );
+	};
+
+
+	// =============================================================================================
+	saveToBackend( e ) {
+
+		let endpoint = e.currentTarget.dataset.endpoint;
 
 		// Call our fetch function below once the component mounts
-		this.callBackendAPI( 'stats' )
+		this.callBackendAPI( endpoint )
 			.then(res => {
 
-				console.log( "stats", res );
+				console.log( endpoint, res );
 			} )
-			.catch(err => console.log( "error-stats", err ) );
-
-		// Call our fetch function below once the component mounts
-		// this.callBackendAPI( 'player' )
-		// 	.then(res => {
-		//
-		// 		console.log( "player", res );
-		// 	} )
-		// 	.catch(err => console.log( "error-player", err ) );
-
-		// Call our fetch function below once the component mounts
-		this.callBackendAPI( 'session' )
-			.then(res => {
-
-				console.log( "session", res );
-			} )
-			.catch(err => console.log( "error-session", err ) );
+			.catch(err => console.log( `error-${endpoint}`, err ) );
 	};
 
 

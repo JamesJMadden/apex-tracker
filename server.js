@@ -6,7 +6,7 @@
 const express = require( 'express' ),
 	request = require( 'request' ),
 	fs = require( 'fs' ),
-	schedule = require( 'schedule' ),
+	schedule = require( 'node-schedule' ),
 	MongoClient = require('mongodb').MongoClient,
 	ObjectID = require('mongodb').ObjectID;
 
@@ -17,32 +17,23 @@ const app = express(),
 	port = process.env.PORT || 5000,
 	config = JSON.parse( fs.readFileSync( './config.json' ) );
 
-let client;
+let client,
+	expiryDate = new Date();
 
-let getStatsFromApiCron = schedule.scheduleJob('00 59 23 * *', function(){
-	console.log('The answer to life, the universe, and everything!');
-} );
+expiryDate = expiryDate.setMinutes( expiryDate.getMinutes() + 5 );
 
 
-/**
- *
- * @param client
- * @return {Promise<void>}
- */
-async function listDatabases(){
-
-	let databasesList = await client.db().admin().listDatabases();
-
-	console.log("Databases:");
-
-	databasesList.databases.forEach(db => console.log(` - ${db.name}`));
-}
+// APEX API OPTIONS
+// -------------------------------------------------------------------------------------------------
+let platform = '5',
+	platformUserIdentifier = config.ApexAPI.originId,
+	segmentType = 'legend';
 
 
 /**
  *
  * @return {Promise<void>}
- */
+ * ============================================================================================== */
 async function main(){
 	/**
 	 * Connection URI. Update <username>, <password>, and <your-cluster-url> to reflect your cluster.
@@ -66,25 +57,58 @@ async function main(){
 	}
 }
 
-main().catch(console.error);
 
-app.listen( port, () => console.log( `Listening on port ${ port }` ) );
+/**
+ *
+ * @function createCronJob
+ *
+ * @description Create a cron job
+ *
+ * @param expiryDate
+ * @param func
+ *
+ * @return {Promise<void>}
+ * ============================================================================================== */
+function createCronJob( expiryDate, func ) {
 
+	schedule.scheduleJob( expiryDate, () => {
 
-// APEX API OPTIONS
-// -------------------------------------------------------------------------------------------------
-let platform = '5',
-	platformUserIdentifier = config.ApexAPI.originId,
-	segmentType = 'legend';
+		console.log( `Running Cron Job @ ${expiryDate} for ${func && func.name}` );
+
+		func && func();
+	} );
+}
 
 
 /**
  *
+ * @function listDatabases
+ *
+ * @description lists available databases
+ *
+ * @return {Promise<void>}
+ * ============================================================================================== */
+async function listDatabases(){
+
+	let databasesList = await client.db().admin().listDatabases();
+
+	console.log("Databases:");
+
+	databasesList.databases.forEach(db => console.log(` - ${db.name}`));
+}
+
+
+/**
+ *
+ * @function makeRequest
+ *
+ * @description makes request to supplied route on the Apex API
+ *
  * @param uri
  * @param res
  * @param callback
- */
-function genReqOptions( uri, res, callback ) {
+ * ============================================================================================== */
+function makeRequest( uri, res, callback ) {
 	let options = {
 		uri: config.ApexAPI.API  + uri,
 		method: 'GET',
@@ -103,121 +127,164 @@ function genReqOptions( uri, res, callback ) {
 }
 
 
-// ROUTES
-// -------------------------------------------------------------------------------------------------
-// GET ORIGIN PROFILE DATA
-// app.get( '/express_backend/profile', ( req, res ) => {
-//
-// 	genReqOptions( `/profile/${platform}/${platformUserIdentifier}`, res, ( body ) => {
-//
-// 		if ( body.data ) body.data.segments.forEach( segment => {
-//
-// 			let obj = Object.assign( segment.metadata, { stats: segment.stats } );
-//
-// 			if ( segment.type === 'legend' && client.isConnected() )
-// 				client.db( 'ApexLegends' ).collection( 'Legends' ).insertOne( obj, ( err, res ) => {
-//
-// 					if ( err ) return console.log( err );
-//
-// 					console.log( 'saved legend to database' );
-// 				} );
-//
-// 			else console.log( "client not connected to database while fetching profile" );
-// 		} );
-// 	} );
-// } );
+/**
+ *
+ * @function setAccountStats
+ *
+ * @description Get account stats and save to DB
+ * ============================================================================================== */
+function setAccountStats() {
 
-// GET APEX ACCOUNT STATS
-app.get( '/express_backend/stats', ( req, res ) => {
+	app.get( '/express_backend/stats', ( req, res ) => {
 
-	genReqOptions( `/profile/${platform}/${platformUserIdentifier}/segments/${segmentType}`, res, ( body ) => {
-
-		if ( body.data ) body.data.forEach( legend => {
-
-			let obj = Object.assign( legend.metadata );
+		makeRequest( `/profile/${platform}/${platformUserIdentifier}/segments/${segmentType}`, res, ( body ) => {
 
 			if ( client.isConnected() ) {
 
-				client.db( 'ApexLegends' ).collection( 'Legends' ).replaceOne( { name: obj.name }, {
-					$set: obj ,
-					$currentDate: { lastModified: true }
-				}, { upsert: true }, ( err, res ) => {
+				if ( body.data ) {
 
-					if ( err ) return console.log( err );
 
-					console.log( 'saved legend stats to database: ' + obj.name, res.upsertedId && res.upsertedId._id, new ObjectID() );
-				} );
-			}
+					// SAVE/UPDATE LEGENDS CURRENT STATS
+					// -----------------------------------------------------------------------------
+					body.data.forEach( legend => {
 
-			else console.log( "client not connected to database while fetching legend stats" );
+						let obj = Object.assign( legend.metadata );
+
+						obj.stats = legend.stats;
+
+						client.db( 'ApexLegends' ).collection( 'Legends' ).replaceOne( { name: obj.name }, {
+							$set: obj,
+							$currentDate: { lastModified: true }
+						}, { upsert: true }, ( err, res ) => {
+
+							if ( err ) return console.log( err );
+
+							console.log( `saved legend stats to database: ${obj.name}`, res.upsertedId && res.upsertedId._id, new ObjectID() );
+						} );
+
+						expiryDate = legend.expiryDate;
+					} );
+				}
+
+				createCronJob( expiryDate, setAccountStats );
+
+			} else console.log( "client not connected to database while fetching legend stats" );
 		} );
 	} );
-} );
+}
 
-// GET SESSION STATS WITH RECENT MATCHES
-app.get( '/express_backend/session', ( req, res ) => {
 
-	genReqOptions( `/profile/${platform}/${platformUserIdentifier}/sessions`, res, ( body ) => {
+/**
+ *
+ * @function setAccountDailyStats
+ *
+ * @description Get account stats and save to DB
+ * ============================================================================================== */
+function setAccountDailyStats() {
 
-		if ( body.data ) body.data.items.forEach( item => {
+	app.get( '/express_backend/stats_daily', ( req, res ) => {
 
-			item.matches && item.matches.forEach( match => {
+		makeRequest( `/profile/${platform}/${platformUserIdentifier}/segments/${segmentType}`, res, ( body ) => {
 
-				let obj = {
-					id: match.id,
-					name: match.metadata.character.displayValue,
-					imageUrl: match.metadata.characterIconUrl.value,
-					bgImageUrl: match.metadata.legendBigImageUrl.value,
-					date: match.metadata.endDate.value,
-					stats: {
-						kills: match.stats.kills && match.stats.kills.value,
-						damage: match.stats.damage && match.stats.damage.value,
-						season4Wins: match.stats.season4Wins && match.stats.season4Wins.value,
-						rank: {
-							rankScoreChange: match.stats.rankScoreChange.value,
-							rankScore: match.stats.rankScore.value,
-							rank: match.stats.rankScore.metadata.rankScoreInfo
-						}
-					}
-				};
+			if ( client.isConnected() ) {
 
-				// SAVE MATCHE TO DB
-				if ( client.isConnected() )
-					client.db( 'ApexLegends' ).collection( 'Matches' ).updateOne(
-						{ id: obj.id },
-						{
-							$set: obj ,
-							$currentDate: { lastModified: true }
-						},
-						{ upsert: true }, ( err, res ) => {
+				if ( body.data ) {
 
-						if ( err ) return console.log( err );
+					let obj = {};
 
-						console.log( 'saved match to database: ' + obj.id );
+					body.data.forEach( ( legend ) => {
+						obj[ legend.metadata.name ] = {
+							stats: legend.stats
+						};
 					} );
 
-				else console.log( "client not connected to database while fetching matches", res.upsertedId && res.upsertedId._id );
-			} );
+					client.db( 'ApexLegends' ).collection( 'LegendsDaily' ).insert( {
+						createdAt: new Date().getTime(),
+						data: obj
+					}, {}, ( err, res ) => {
+						console.log( `Record added as ${res}` );
+					} );
+				}
+
+			} else console.log( "client not connected to database while fetching legend stats" );
 		} );
 	} );
-} );
+}
 
-// GET PLAYER STATS
-// app.get( '/express_backend/player', ( req, res ) => {
-//
-// 	genReqOptions( `/search`, res, ( body ) => {
-//
-// 		// if ( body.data ) body.data.segments.forEach( segment => {
-// 		//
-// 		// 	let obj = Object.assign( segment.metadata, { stats: segment.stats } );
-// 		//
-// 		// 	if ( segment.type === 'legend' && client.isConnected() )
-// 		// 		client.db( 'ApexLegends' ).collection( 'Matches' ).insertOne( obj, ( err, res ) => {
-// 		//
-// 		// 			if ( err ) return console.log( err );
-// 		//
-// 		// 			console.log( 'saved to database' );
-// 		// 		} );
-// 		// } );
-// 	} );
-// } );
+
+/**
+ *
+ * @function setSessionStats
+ *
+ * @description Get session stats with recent matches and save to DB
+ * ============================================================================================== */
+function setSessionStats() {
+
+	request({
+		url: 'http://localhost:5000/express_backend/session', //on 3000 put your port no.
+		method: 'POST',
+		json: {
+			template: template.toLowerCase(),
+			obj: mailObj
+		}
+	}, function (error, response, body) {
+		console.log({error: error, response: response, body: body});
+	});
+
+	app.get( '/express_backend/session', ( req, res ) => {
+
+		makeRequest( `/profile/${platform}/${platformUserIdentifier}/sessions`, res, ( body ) => {
+
+			if ( body.data ) body.data.items.forEach( item => {
+
+				item.matches && item.matches.forEach( match => {
+
+					let obj = {
+						id: match.id,
+						name: match.metadata.character.displayValue,
+						imageUrl: match.metadata.characterIconUrl.value,
+						bgImageUrl: match.metadata.legendBigImageUrl.value,
+						date: match.metadata.endDate.value,
+						stats: {
+							kills: match.stats.kills && match.stats.kills.value,
+							damage: match.stats.damage && match.stats.damage.value,
+							season4Wins: match.stats.season4Wins && match.stats.season4Wins.value,
+							rank: {
+								rankScoreChange: match.stats.rankScoreChange.value,
+								rankScore: match.stats.rankScore.value,
+								rank: match.stats.rankScore.metadata.rankScoreInfo
+							}
+						}
+					};
+
+					// SAVE MATCHE TO DB
+					if ( client.isConnected() )
+						client.db( 'ApexLegends' ).collection( 'Matches' ).updateOne(
+							{ id: obj.id },
+							{
+								$set: obj ,
+								$currentDate: { lastModified: true }
+							},
+							{ upsert: true }, ( err, res ) => {
+
+								if ( err ) return console.log( err );
+
+								console.log( 'saved match to database: ' + obj.id );
+							} );
+
+					else console.log( "client not connected to database while fetching matches", res.upsertedId && res.upsertedId._id );
+				} );
+
+				expiryDate = item.expiryDate;
+			} );
+
+			createCronJob( expiryDate, setSessionStats );
+		} );
+	} );
+}
+
+main().catch(console.error);
+
+app.listen( port, () => console.log( `Listening on port ${ port }` ) );
+
+setAccountStats();
