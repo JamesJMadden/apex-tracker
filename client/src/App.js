@@ -17,6 +17,9 @@ class App extends Component {
 
     // =============================================================================================
     render() {
+
+		// TODO: CHECK LOGIN STATUS AND IF NOT LOGGED IN, RETURN SEPARATE MAIN VIEW
+
         return (
             <div className="App">
 				<header className="App-header">
@@ -28,8 +31,9 @@ class App extends Component {
 				<div className="App-intro">
 					<div dangerouslySetInnerHTML={ { __html:this.state.data && this.state.data.body } }></div>
 
-					<button onClick={this.saveToBackend} data-endpoint="stats">Get Account Stats</button>
-					<button onClick={this.saveToBackend} data-endpoint="session">Get Session Stats</button>
+					<button onClick={this.saveToBackend.bind( null, 'stats' )}>Get Account Stats</button>
+					<button onClick={this.saveToBackend.bind( null, 'stats_daily' )}>Get Account Daily Stats</button>
+					<button onClick={this.saveToBackend.bind( null, 'session' )}>Get Session Stats</button>
 				</div>
             </div>
    		);
@@ -43,9 +47,7 @@ class App extends Component {
 
 
 	// =============================================================================================
-	saveToBackend( e ) {
-
-		let endpoint = e.currentTarget.dataset.endpoint;
+	saveToBackend( endpoint ) {
 
 		// Call our fetch function below once the component mounts
 		this.callBackendAPI( endpoint )
@@ -61,7 +63,7 @@ class App extends Component {
 	// =============================================================================================
 	callBackendAPI = async ( endpoint ) => {
 
-		const response = await fetch(`/express_backend/${endpoint}`);
+		const response = await fetch(`/${endpoint}`);
 
 		await console.log( "callBackendAPI " + endpoint + ": " + response.status, response );
 
